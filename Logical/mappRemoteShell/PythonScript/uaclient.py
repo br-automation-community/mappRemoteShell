@@ -136,3 +136,12 @@ class UaClient(object):
         descs = node.get_children_descriptions()
         descs.sort(key=lambda x: x.BrowseName)
         return descs
+        
+    def get_namespace_array(self):
+        """
+        Get the namespace array from the server
+        """
+        if not self._connected:
+            return []
+        ns_node = self.client.get_node(ua.NodeId(ua.ObjectIds.Server_NamespaceArray))
+        return ns_node.get_value()

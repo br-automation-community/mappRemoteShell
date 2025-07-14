@@ -4,6 +4,7 @@ import subprocess
 import platform
 import sys
 import time
+import os
 import configparser
 from uaclient import UaClient
 from asyncua.sync import ua
@@ -14,6 +15,8 @@ from window import Ui_MainWindow
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 frmMain = None
+config_path = None
+config = None
 
 # ----------------------------------------------------------------------------------------
 # fix windows taskbar icon
@@ -155,12 +158,12 @@ class OpcClientThread(QtCore.QThread):
         if "execute" in str(node) and val:
             try:
                 # get command variable
-                nodeCommand = self.client.get_node("ns=6;s=::" + config_plc_task + ":" + config_plc_var + ".command")
+                nodeCommand = self.client.get_node("ns=" + str(self.ns_index) + ";s=::" + config_plc_task + ":" + config_plc_var + ".command")
                 valCommand = nodeCommand.get_value()
                 # get command variable
-                nodeResponse = self.client.get_node("ns=6;s=::" + config_plc_task + ":" + config_plc_var + ".response")
+                nodeResponse = self.client.get_node("ns=" + str(self.ns_index) + ";s=::" + config_plc_task + ":" + config_plc_var + ".response")
                 # set status variable to 65535
-                nodeStatus = self.client.get_node("ns=6;s=::" + config_plc_task + ":" + config_plc_var + ".status")
+                nodeStatus = self.client.get_node("ns=" + str(self.ns_index) + ";s=::" + config_plc_task + ":" + config_plc_var + ".status")
                 dv = ua.DataValue(ua.Variant([65535], ua.VariantType.UInt16))
                 nodeStatus.set_value(dv)
                 # execute command
@@ -226,7 +229,7 @@ class OpcClientThread(QtCore.QThread):
                 try:
                     # reset execute variable on PLC
                     if frmMain.threadOPC.client._connected:
-                        exc_opc = self.client.get_node("ns=6;s=::" + config_plc_task + ":" + config_plc_var + ".execute")
+                        exc_opc = self.client.get_node("ns=" + str(self.ns_index) + ";s=::" + config_plc_task + ":" + config_plc_var + ".execute")
                         dv = ua.DataValue(ua.Variant([False], ua.VariantType.Boolean))
                         exc_opc.set_value(dv)
                 except Exception as e:                    
@@ -246,6 +249,20 @@ class OpcClientThread(QtCore.QThread):
         frmMain.alive_counter = 0
 
     # ----------------------------------------------------------------------------------------
+    # find pv namespace
+    def find_namespace(self, ns_target):
+        ns_node = self.client.get_node(ua.NodeId(ua.ObjectIds.Server_NamespaceArray))
+        namespaces = ns_node.get_value()
+        # Find index of 'urn:B&R/pv/'
+        ns_index = None
+        for idx, ns in enumerate(namespaces):
+            if ns == ns_target:
+                ns_index = idx
+                break
+
+        return ns_index      
+        
+    # ----------------------------------------------------------------------------------------
     # connect to OPC UA server
     def connect(self, server_url):
         try:
@@ -256,8 +273,26 @@ class OpcClientThread(QtCore.QThread):
             time.sleep(0.5)
             self.sig_log.emit(str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")) + " connected successful", True)
 
+            # Find pv namespace
+            self.ns_index = self.find_namespace('http://br-automation.com/OpcUa/PLC/PV/')
+            if self.ns_index is not None:
+                self.sig_log.emit(str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")) + f" Namespace found at index {self.ns_index}", True)
+            else:
+                self.ns_index = self.find_namespace('urn:B&R/pv/')
+                if self.ns_index is not None:
+                    self.sig_log.emit(str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")) + f" Namespace found at index {self.ns_index}", True)
+                else:
+                    self.sig_log.emit(str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")) + " Namespace not found", True)
+                    # close connection, ignore errors
+                    try:
+                        self.btnConnect.setVisible(False)
+                        self.disconnect()
+                    except Exception as e:
+                        print(e)
+                    return
+
             # check if task exists on PLC
-            var_structure = self.client.get_node("ns=6;s=::" + config_plc_task)
+            var_structure = self.client.get_node("ns=" + str(self.ns_index) + ";s=::" + config_plc_task)
             result = var_structure.get_children()
             if len(result) != 0:
                 self.sig_log.emit(str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")) + " support task " + config_plc_task + " found on PLC", False)
@@ -267,12 +302,12 @@ class OpcClientThread(QtCore.QThread):
                 for opc_var in result:
                     print(opc_var)
 
-                    if str(opc_var) == "ns=6;s=::" + config_plc_task + ":" + config_plc_var:
+                    if str(opc_var) == "ns=" + str(self.ns_index) + ";s=::" + config_plc_task + ":" + config_plc_var:
                         self.sig_log.emit(str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")) + " variable " + config_plc_var + "structure found on PLC", False)
     
                         # connect opc variables
-                        varExecute = self.client.get_node("ns=6;s=::" + config_plc_task + ":" + config_plc_var + ".execute")
-                        varAliveCounter = self.client.get_node("ns=6;s=::" + config_plc_task + ":" + config_plc_var + ".alive_counter")
+                        varExecute = self.client.get_node("ns=" + str(self.ns_index) + ";s=::" + config_plc_task + ":" + config_plc_var + ".execute")
+                        varAliveCounter = self.client.get_node("ns=" + str(self.ns_index) + ";s=::" + config_plc_task + ":" + config_plc_var + ".alive_counter")
                         subHandler = DataChangeHandler()
                         subHandler.data_change.connect(self.data_changed, type=QtCore.Qt.QueuedConnection)
                         # create subscription
@@ -302,7 +337,7 @@ class OpcClientThread(QtCore.QThread):
         except Exception as e:
             raise e
 
-   # ----------------------------------------------------------------------------------------
+    # ----------------------------------------------------------------------------------------
     # disconnect from OPC UA server
     def disconnect(self):
         # disconnect, ignore errors
@@ -310,7 +345,7 @@ class OpcClientThread(QtCore.QThread):
             self.client.disconnect()
         except Exception as e:                    
             print(e)
-
+            
 # ----------------------------------------------------------------------------------------
 # PyQt main frame class
 class MappRemoteShell(QtWidgets.QMainWindow, Ui_MainWindow):
@@ -353,40 +388,45 @@ class MappRemoteShell(QtWidgets.QMainWindow, Ui_MainWindow):
 
     # ip changed event
     def config_ip(self):
+        global config, config_path
         config.set('eth', 'ip', self.txtPLC_IP.text())
-        with open('config.ini', 'w') as configfile:
+        with open(config_path, 'w') as configfile:
             config.write(configfile)
 
     def config_port_opcua(self):
+        global config, config_path
         config.set('eth', 'port_opcua', self.txtPLC_Port.text())
-        with open('config.ini', 'w') as configfile:
+        with open(config_path, 'w') as configfile:
             config.write(configfile)            
 
     # checkbox balloon event
     def config_balloon(self):
+        global config, config_path
         if self.chkBalloon.isChecked():
             config.set('default', 'show_balloon', "True")
         else:
             config.set('default', 'show_balloon', "False")
-        with open('config.ini', 'w') as configfile:
+        with open(config_path, 'w') as configfile:
             config.write(configfile)
 
     # checkbox reconnect event
     def config_reconnect(self):
+        global config, config_path
         if self.chkReconnect.isChecked():
             config.set('default', 'auto_reconnect', "True")
         else:
             config.set('default', 'auto_reconnect', "False")
-        with open('config.ini', 'w') as configfile:
+        with open(config_path, 'w') as configfile:
             config.write(configfile)
 
     # checkbox minimized event
     def config_minimized(self):
+        global config, config_path
         if self.chkMinimized.isChecked():
             config.set('default', 'start_minimized', "True")
         else:
             config.set('default', 'start_minimized', "False")
-        with open('config.ini', 'w') as configfile:
+        with open(config_path, 'w') as configfile:
             config.write(configfile)            
 
     # button connect event
@@ -467,7 +507,30 @@ def exit_app():
 # start ui and ping timer
 if __name__ == '__main__':
     config = configparser.ConfigParser()
-    config.read("config.ini")
+    
+    # Get the directory where the script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "config.ini")
+    
+    # Check if config.ini exists, create with defaults if not
+    if not os.path.exists(config_path):
+        config['eth'] = {
+            'ip': '127.0.0.1',
+            'port_opcua': '4840'
+        }
+        config['plc'] = {
+            'task': 'mpRemote',
+            'var': 'mappRemoteShell'
+        }
+        config['default'] = {
+            'show_balloon': 'False',
+            'auto_reconnect': 'False',
+            'start_minimized': 'False'
+        }
+        with open(config_path, 'w') as configfile:
+            config.write(configfile)
+    
+    config.read(config_path)
     config_ip = config.get('eth', 'ip')
     config_port_opcua = config.get('eth', 'port_opcua')
     config_plc_task = config.get('plc', 'task')

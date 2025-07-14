@@ -1,4 +1,10 @@
-For a detailed description see https://br-automation-com.github.io/mappRemoteShell/
+For a detailed description see https://github.com/br-automation-community.github.io/mappRemoteShell/
+
+#### Version 0.9
+* Update Automation Studio to 4.12
+* Update mapp to 5.24
+* Create config.ini if it does not exist
+* Identify variable namespace dynamically
 
 #### Version 0.8
 * Python Script: Better error handling with hypervisor systems and automatic reconnect
